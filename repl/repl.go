@@ -7,6 +7,7 @@ import (
 
 	"github.com/Martin-Martinez4/compiler_in_go/compiler"
 	"github.com/Martin-Martinez4/compiler_in_go/lexer"
+	"github.com/Martin-Martinez4/compiler_in_go/object"
 	"github.com/Martin-Martinez4/compiler_in_go/parser"
 	"github.com/Martin-Martinez4/compiler_in_go/vm"
 )
@@ -23,6 +24,10 @@ func printParseErrors(out io.Writer, errors []string) {
 func Start(in io.Reader, out io.Writer) {
 	scanner := bufio.NewScanner(in)
 	// env := object.NewEnvironment()
+
+	constants := []object.Object{}
+	globals := make([]object.Object, vm.GlobalSize)
+	symbolTable := compiler.NewSymbolTable()
 
 	for {
 		fmt.Fprintf(out, PROMPT)
@@ -49,14 +54,17 @@ func Start(in io.Reader, out io.Writer) {
 		// }
 
 		// hook up to compiler
-		comp := compiler.New()
+		comp := compiler.NewWithState(symbolTable, constants)
 		err := comp.Compile(program)
 		if err != nil {
 			fmt.Fprintf(out, "Compilation failed:\n %s\n", err)
 			continue
 		}
 
-		machine := vm.New(comp.Bytecode())
+		code := comp.Bytecode()
+		constants = code.Constants
+
+		machine := vm.NewWithGlobalStore(code, globals)
 		err = machine.Run()
 		if err != nil {
 			fmt.Fprintf(out, "Executing bytecode failed:\n %s\n", err)
