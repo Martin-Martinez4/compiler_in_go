@@ -105,6 +105,17 @@ func testExpectedObject(t *testing.T, expected interface{}, actual object.Object
 			t.Errorf("object is not Null: %T (%+v)", actual, actual)
 		}
 
+	case *object.Error:
+		errObj, ok := actual.(*object.Error)
+		if !ok {
+			t.Errorf("object is not an Error: %T (%+v)", actual, actual)
+			return
+		}
+
+		if errObj.Message != expected.Message {
+			t.Errorf("wrong error message. got=%q, want=%q", errObj.Message, expected.Message)
+		}
+
 	case string:
 		err := testStringObject(expected, actual)
 		if err != nil {
@@ -128,6 +139,7 @@ func testExpectedObject(t *testing.T, expected interface{}, actual object.Object
 			if err != nil {
 				t.Errorf("testIntegerObject failed: %s", err)
 			}
+
 		}
 
 	case map[object.HashKey]int64:
@@ -487,4 +499,126 @@ func TestCallingFunctionsWithWrongArguments(t *testing.T) {
 			t.Fatalf("wrong VM error: want=%q, got=%q", tt.expected, err)
 		}
 	}
+}
+
+func TestBuiltinFunctions(t *testing.T) {
+	tests := []vmTestCase{
+		{`len("")`, 0},
+		{`len("four")`, 4},
+		{`len("hello world")`, 11},
+		{`len(1)`,
+			&object.Error{
+				Message: "argument to len not supported. got=INTEGER",
+			},
+		},
+		{`len("one", "two")`,
+			&object.Error{
+				Message: "wrong number of arguments. got=2, want=1",
+			},
+		},
+		{`len([1, 2, 3])`, 3},
+		{`len([])`, 0},
+		{`put("hello", "world!")`, Null},
+		{`first([1, 2, 3])`, 1},
+		{`first([])`, Null},
+		{`first(1)`,
+			&object.Error{
+				Message: "argument to first must be ARRAY, got INTEGER",
+			},
+		},
+		{`last([1, 2, 3])`, 3},
+		{`last([])`, Null},
+		{`last(1)`,
+			&object.Error{
+				Message: "argument to last must be ARRAY, got INTEGER",
+			},
+		},
+		{`rest([1, 2, 3])`, []int{2, 3}},
+		{`rest([])`, Null},
+		{`push([], 1)`, []int{1}},
+		{`push(1, 1)`,
+			&object.Error{
+				Message: "argument to push must be ARRAY, got INTEGER",
+			},
+		},
+	}
+	runVmTests(t, tests)
+}
+
+func TestClosures(t *testing.T) {
+	tests := []vmTestCase{
+		{
+			input: `
+				let newClosure = fn(a) { fn() { a; };
+				}; let closure = newClosure(99);
+				closure(); `,
+			expected: 99,
+		},
+		{
+			input: `
+				let newAdder = fn(a, b) { fn(c) { a + b + c };
+				}; let adder = newAdder(1, 2);
+				adder(8); `,
+			expected: 11,
+		},
+		{
+			input: `
+				let newAdder = fn(a, b) { let c = a + b; fn(d) { c + d };
+				}; let adder = newAdder(1, 2);
+				adder(8); `,
+			expected: 11,
+		},
+		{
+			input: `
+				let newAdderOuter = fn(a, b) { let c = a + b; fn(d) { let e = d + c; fn(f) { e + f; };
+				}; };
+				let newAdderInner = newAdderOuter(1, 2) let adder = newAdderInner(3);
+				adder(8); `,
+			expected: 14,
+		},
+		{
+			input: `
+				let a = 1; let newAdderOuter = fn(b) { fn(c) {
+				fn(d) { a + b + c + d }; }; };
+				let newAdderInner = newAdderOuter(2) let adder = newAdderInner(3);
+				adder(8); `,
+			expected: 14,
+		},
+		{
+			input: `
+				let newClosure = fn(a, b) { let one = fn() { a; }; let two = fn() { b; }; fn() { one() + two(); };
+				}; let closure = newClosure(9, 90);
+				closure(); `,
+			expected: 99,
+		},
+	}
+	runVmTests(t, tests)
+}
+
+func TestRecursiveFunctions(t *testing.T) {
+	tests := []vmTestCase{
+		{
+			input: `
+				let countDown = fn(x) { if (x == 0) { return 0;
+				} else { countDown(x - 1); } };
+				countDown(1); `,
+			expected: 0,
+		},
+		{
+			input: `
+				let countDown = fn(x) { if (x == 0) { return 0;
+				} else { countDown(x - 1); } };
+				let wrapper = fn() { countDown(1);
+				}; wrapper();`,
+			expected: 0,
+		},
+		{
+			input: `
+				let wrapper = fn() { let countDown = fn(x) { if (x == 0) { return 0;
+				} else { countDown(x - 1); } }; countDown(1); };
+				wrapper(); `,
+			expected: 0,
+		},
+	}
+	runVmTests(t, tests)
 }
